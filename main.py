@@ -11,9 +11,9 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
-from cipher import FileDecryptor, FileEncryptorThread
-from gui import P2PWindow
-from ipc_link import IPCClientThread
+from src.cipher import FileDecryptor, FileEncryptorThread
+from src.gui import P2PWindow
+from src.ipc_link import IPCClientThread
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 

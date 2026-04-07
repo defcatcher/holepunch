@@ -385,20 +385,23 @@ Sessions are automatically expired after **10 minutes** of inactivity.
 holepunch/
 │
 ├── main.py                         # Entry point — spawns Go, connects IPC
-├── gui.py                          # PyQt6 window, dialogs, drop zone
-├── cipher.py                       # AES-256-GCM encrypt / decrypt threads
-├── ipc_link.py                     # IPC client thread (Python ↔ Go TCP)
-├── mock_router.py                  # Dev utility: bridges two local clients
-│
-├── style.qss                       # Dark theme stylesheet
-├── style_light.qss                 # Light theme stylesheet
 ├── requirements.txt                # Python dependencies
 ├── INTERFACE.md                    # IPC wire protocol specification
 │
-├── scripts/
-│   ├── build.sh                    # Cross-platform Go build (macOS / Linux)
-│   ├── build.bat                   # Windows build
-│   └── deploy-signal.sh            # GCP Cloud Run deployment
+├── src/                            # Python application logic
+│   ├── __init__.py
+│   ├── gui.py                      # PyQt6 window, dialogs, drop zone
+│   ├── cipher.py                   # AES-256-GCM encrypt / decrypt threads
+│   └── ipc_link.py                 # IPC client thread (Python ↔ Go TCP)
+│
+├── assets/                         # Static files and themes
+│   ├── style.qss                   # Dark theme stylesheet
+│   └── style_light.qss             # Light theme stylesheet
+│
+├── scripts/                        # Build and deployment scripts
+│   ├── build.sh                    
+│   ├── build.bat                   
+│   └── deploy-signal.sh            
 │
 ├── bin/                            # Compiled binaries (git-ignored)
 │   ├── .gitkeep

@@ -111,8 +111,7 @@ Go does **not** need to decrypt these. Just forward the bytes as a framed binary
 0x02 = Binary chunk
 ```
 
-> ⚠️ The current Python client uses try/except heuristics (try UTF-8 decode → try JSON parse → else treat as binary). This works in practice but is fragile. If the Go backend uses a type-prefix framing, update `ipc_link.py` accordingly.
-
+> ⚠️ The current Python client uses try/except heuristics (try UTF-8 decode → try JSON parse → else treat as binary). This works in practice but is fragile. If the Go backend uses a type-prefix framing, update src/ipc_link.py accordingly.
 ---
 
 ## Full Transfer Flow

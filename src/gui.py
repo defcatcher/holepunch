@@ -84,7 +84,7 @@ class P2PWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("HolePunch v1.0")
+        self.setWindowTitle("HolePunch")
         self.resize(800, 500)
 
         # Криптографічно безпечна генерація коду
@@ -364,12 +364,15 @@ class P2PWindow(QMainWindow):
 
     def change_theme(self, theme_name):
         file_name = "style_light.qss" if "Light" in theme_name else "style.qss"
-        style_path = os.path.join(os.path.dirname(__file__), file_name)
+
+        base_dir = os.path.dirname(os.path.dirname(__file__))
+        style_path = os.path.join(base_dir, "assets", file_name)
+        
         if os.path.exists(style_path):
             with open(style_path, "r") as f:
                 self.setStyleSheet(f.read())
         else:
-            print(f"Warning: Theme file {file_name} not found.")
+            print(f"Warning: Theme file {style_path} not found.")
 
     def load_signal_url(self, url: str):
         self.signal_url_input.setText(url)

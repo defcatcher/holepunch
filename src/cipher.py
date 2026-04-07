@@ -1,4 +1,5 @@
 import os
+import tarfile
 from PyQt6.QtCore import QThread, pyqtSignal
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -31,7 +32,6 @@ class FileEncryptorThread(QThread):
     def run(self):
         try:
             aesgcm = AESGCM(self.key)
-            file_size = os.path.getsize(self.file_path)
             processed_size = 0
 
             with open(self.file_path, 'rb') as f:
@@ -47,14 +47,80 @@ class FileEncryptorThread(QThread):
                     self.chunk_ready.emit(payload)
 
                     processed_size += len(chunk)
-                    percent = int((processed_size / file_size) * 100)
-                    self.progress.emit(percent)
+                    self.progress.emit(processed_size)
 
             if self.is_running:
                 self.finished.emit()
 
         except Exception as e:
             self.error.emit(str(e))
+
+    def stop(self):
+        self.is_running = False
+
+class EmitterStream:
+    def __init__(self, encryptor_thread):
+        self.thread = encryptor_thread
+        self.buffer = bytearray()
+        self.processed_size = 0
+
+    def write(self, data: bytes):
+        if not self.thread.is_running:
+            return len(data)
+
+        self.buffer.extend(data)
+        
+        while len(self.buffer) >= CHUNK_SIZE and self.thread.is_running:
+            chunk = bytes(self.buffer[:CHUNK_SIZE])
+            del self.buffer[:CHUNK_SIZE]
+
+            nonce = os.urandom(12)
+            encrypted_chunk = self.thread.aesgcm.encrypt(nonce, chunk, None)
+            self.thread.chunk_ready.emit(nonce + encrypted_chunk)
+
+            self.processed_size += len(chunk)
+            self.thread.progress.emit(self.processed_size)
+
+        return len(data)
+
+    def flush(self):
+        if self.buffer and self.thread.is_running:
+            chunk = bytes(self.buffer)
+            nonce = os.urandom(12)
+            encrypted_chunk = self.thread.aesgcm.encrypt(nonce, chunk, None)
+            self.thread.chunk_ready.emit(nonce + encrypted_chunk)
+            self.processed_size += len(chunk)
+            self.buffer.clear()
+            self.thread.progress.emit(self.processed_size)
+
+class FolderEncryptorThread(QThread):
+    progress = pyqtSignal(int)
+    chunk_ready = pyqtSignal(bytes)
+    finished = pyqtSignal()
+    error = pyqtSignal(str)
+
+    def __init__(self, folder_path: str, password: str, pin_code: str, total_size: int):
+        super().__init__()
+        self.folder_path = folder_path
+        self.key = generate_key(password, pin_code)
+        self.aesgcm = AESGCM(self.key)
+        self.total_size = total_size
+        self.is_running = True
+
+    def run(self):
+        try:
+            stream = EmitterStream(self)
+            with tarfile.open(fileobj=stream, mode='w|') as tar:
+                base_name = os.path.basename(self.folder_path)
+                tar.add(self.folder_path, arcname=base_name)
+            
+            stream.flush()
+
+            if self.is_running:
+                self.finished.emit()
+
+        except Exception as e:
+            self.error.emit(f"Archiving error: {str(e)}")
 
     def stop(self):
         self.is_running = False

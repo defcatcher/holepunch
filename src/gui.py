@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
     QStackedWidget,
     QVBoxLayout,
     QWidget,
+    QSystemTrayIcon
 )
 
 
@@ -87,7 +88,6 @@ class P2PWindow(QMainWindow):
         self.setWindowTitle("HolePunch")
         self.resize(800, 500)
 
-        # Криптографічно безпечна генерація коду
         self.my_peer_code = (
             f"{secrets.randbelow(900) + 100:03d}-{secrets.randbelow(900) + 100:03d}"
         )
@@ -147,7 +147,11 @@ class P2PWindow(QMainWindow):
             lambda: self.switch_page(self.page_settings, self.btn_settings)
         )
 
-        # Завантажуємо темну тему при старті (усунуто подвійне завантаження)
+        self.tray_icon = QSystemTrayIcon(self)
+        icon = self.style().standardIcon(self.style().StandardPixmap.SP_DriveNetIcon)
+        self.tray_icon.setIcon(icon)
+        self.tray_icon.show()
+
         self.change_theme("Dark (Default)")
 
     def init_transfer_page(self):
@@ -201,7 +205,6 @@ class P2PWindow(QMainWindow):
         layout.addWidget(title)
         layout.addSpacing(20)
 
-        # Signal URL
         signal_layout = QHBoxLayout()
         self.signal_url_input = QLineEdit()
         self.signal_url_input.setPlaceholderText(
@@ -314,7 +317,7 @@ class P2PWindow(QMainWindow):
         reply = QMessageBox.question(
             self,
             "Incoming Transfer",
-            f"Accept file: {filename}\nSize: {size_str}?",
+            f"Accept file/folder: {filename}\nSize: {size_str}?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
 
@@ -379,3 +382,7 @@ class P2PWindow(QMainWindow):
 
     def load_styles(self):
         self.change_theme("Dark")
+        
+    def show_notification(self, title: str, message: str):
+        if self.tray_icon.isVisible():
+            self.tray_icon.showMessage(title, message, QSystemTrayIcon.MessageIcon.Information, 4000)

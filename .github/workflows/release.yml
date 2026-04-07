@@ -1,0 +1,502 @@
+# =============================================================================
+# HolePunch — Release Workflow
+# =============================================================================
+#
+# TRIGGERS
+#   • Push a version tag:        git tag v1.2.3 && git push --tags
+#   • Manual run (no tag needed): Actions tab → "Release" → "Run workflow"
+#
+# JOBS
+#   build-go      Build the holepunch binary for all 6 OS/arch combinations.
+#   build-bundle  PyInstaller "onefile" bundle (Python + Go + assets) for each
+#                 desktop platform. Runs after build-go.
+#   release       Create the GitHub Release and attach every artefact.
+#
+# RELEASE ARTEFACTS
+#   HolePunch-windows-amd64-<tag>.exe   ← all-in-one bundle (users download this)
+#   HolePunch-linux-amd64-<tag>
+#   HolePunch-darwin-amd64-<tag>
+#   HolePunch-darwin-arm64-<tag>
+#   holepunch-windows-amd64.exe         ← Go backend only  (developers / CI)
+#   holepunch-windows-arm64.exe
+#   holepunch-darwin-amd64
+#   holepunch-darwin-arm64
+#   holepunch-linux-amd64
+#   holepunch-linux-arm64
+#   signal-server-linux-amd64           ← Cloud Run deployment
+#
+# =============================================================================
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+  # Allows manual runs from the Actions tab for testing.
+  # When triggered manually the tag defaults to "dev".
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag (e.g. v1.0.0)"
+        required: false
+        default: "dev"
+
+# Only one release per tag/branch at a time.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write # required to create a GitHub Release and upload assets
+
+env:
+  GO_VERSION: "1.22"
+  PYTHON_VERSION: "3.11"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+# ============================================================================
+# Resolve the effective version string once, share it across all jobs.
+# ============================================================================
+jobs:
+  # --------------------------------------------------------------------------
+  # JOB 0 — resolve version
+  # --------------------------------------------------------------------------
+  meta:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - name: Determine version string
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            # Strip the leading "refs/tags/" to get the bare tag name.
+            echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+  # --------------------------------------------------------------------------
+  # JOB 1 — Build Go binaries (matrix: 6 platforms)
+  # --------------------------------------------------------------------------
+  build-go:
+    name: Go binary · ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: meta
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {
+              goos: windows,
+              goarch: amd64,
+              runner: windows-latest,
+              asset: holepunch-windows-amd64.exe,
+            }
+          - {
+              goos: windows,
+              goarch: arm64,
+              runner: windows-latest,
+              asset: holepunch-windows-arm64.exe,
+            }
+          - {
+              goos: darwin,
+              goarch: amd64,
+              runner: ubuntu-latest,
+              asset: holepunch-darwin-amd64,
+            }
+          - {
+              goos: darwin,
+              goarch: arm64,
+              runner: macos-latest,
+              asset: holepunch-darwin-arm64,
+            }
+          - {
+              goos: linux,
+              goarch: amd64,
+              runner: ubuntu-latest,
+              asset: holepunch-linux-amd64,
+            }
+          - {
+              goos: linux,
+              goarch: arm64,
+              runner: ubuntu-latest,
+              asset: holepunch-linux-arm64,
+            }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go ${{ env.GO_VERSION }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: core/go.sum
+
+      - name: Build holepunch
+        working-directory: core
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: >
+          go build
+          -ldflags="-s -w -X main.version=${{ needs.meta.outputs.version }}"
+          -trimpath
+          -o ../bin/${{ matrix.asset }}
+          ./cmd/holepunch
+
+      # Build signal-server once (linux/amd64 — matches Cloud Run target).
+      - name: Build signal-server
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        working-directory: core
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: >
+          go build
+          -ldflags="-s -w -X main.version=${{ needs.meta.outputs.version }}"
+          -trimpath
+          -o ../bin/signal-server-linux-amd64
+          ./cmd/signal-server
+
+      - name: Upload holepunch artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-bin-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: bin/${{ matrix.asset }}
+          retention-days: 1
+
+      - name: Upload signal-server artefact
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: signal-server-linux-amd64
+          path: bin/signal-server-linux-amd64
+          retention-days: 1
+
+  # --------------------------------------------------------------------------
+  # JOB 2 — PyInstaller bundles (matrix: 4 desktop platforms)
+  # --------------------------------------------------------------------------
+  build-bundle:
+    name: Bundle · ${{ matrix.display }}
+    needs: [meta, build-go]
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - display: "Windows x64"
+            runner: windows-latest
+            goos: windows
+            goarch: amd64
+            go_asset: holepunch-windows-amd64.exe
+            windowed: "true"
+
+          - display: "Linux x64"
+            runner: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            go_asset: holepunch-linux-amd64
+            windowed: "false"
+
+          - display: "macOS Apple Silicon"
+            runner: macos-latest
+            goos: darwin
+            goarch: arm64
+            go_asset: holepunch-darwin-arm64
+            windowed: "true"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Download the Go binary produced by job 1 ──────────────────────────
+      - name: Download Go binary
+        uses: actions/download-artifact@v4
+        with:
+          name: go-bin-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: bin/
+
+      - name: Mark binary executable (POSIX)
+        if: runner.os != 'Windows'
+        run: chmod +x bin/${{ matrix.go_asset }}
+
+      # ── Python environment ─────────────────────────────────────────────────
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies and PyInstaller
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      # ── Linux: Qt runtime system libraries ────────────────────────────────
+      - name: Install Qt system libraries (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libgl1 libglib2.0-0 libdbus-1-3 \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+            libxcb-shape0 libxcb-xinerama0 libxcb-xkb1 \
+            libxkbcommon-x11-0 libxkbcommon0 libegl1 libfontconfig1
+
+      # ── Runtime hook: teaches the frozen bundle where the Go binary is ─────
+      #
+      # PyInstaller extracts everything into a temp sys._MEIPASS folder.
+      # The _find_binary() function in main.py looks in <script_dir>/bin/.
+      # This hook sets an env var so the lookup is redirected to _MEIPASS.
+      - name: Write PyInstaller runtime hook
+        shell: python
+        run: |
+          import os
+          os.makedirs("build_hooks", exist_ok=True)
+          hook = (
+              "import os, sys\n"
+              "# Redirect _find_binary() to the PyInstaller extraction directory.\n"
+              "os.environ.setdefault('_HOLEPUNCH_MEIPASS', sys._MEIPASS)\n"
+          )
+          with open("build_hooks/hook_runtime.py", "w") as fh:
+              fh.write(hook)
+          print("Runtime hook written.")
+
+      # Patch _find_binary() in main.py to honour _HOLEPUNCH_MEIPASS.
+      - name: Patch _find_binary for frozen bundle
+        shell: python
+        env:
+          GO_ASSET: ${{ matrix.go_asset }}
+        run: |
+          import os
+
+          with open("main.py", encoding="utf-8") as fh:
+              src = fh.read()
+
+          go_asset = os.environ["GO_ASSET"]
+
+          patch = (
+              "    # --- PyInstaller bundle path resolution ---\n"
+              "    _meipass = os.environ.get('_HOLEPUNCH_MEIPASS')\n"
+              "    if _meipass:\n"
+              f"        candidate = Path(_meipass) / '{go_asset}'\n"
+              "        if candidate.exists():\n"
+              "            return str(candidate)\n"
+              "    # --- end patch ---\n"
+          )
+
+          marker = "    bin_dir = Path(__file__).parent / \"bin\"\n"
+          if marker in src and patch not in src:
+              src = src.replace(marker, patch + marker)
+              with open("main.py", "w", encoding="utf-8") as fh:
+                  fh.write(src)
+              print("Patched _find_binary successfully.")
+          else:
+              print("Patch already applied or marker not found — skipping.")
+
+      # ── Run PyInstaller via Python to handle OS-specific path separators ───
+      #
+      # On Windows --add-data uses ";" as separator; on Unix it uses ":".
+      # Invoking PyInstaller through the Python API avoids shell quoting issues
+      # and lets us pick the right separator at runtime.
+      - name: Build PyInstaller bundle
+        shell: python
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GO_ASSET: ${{ matrix.go_asset }}
+          WINDOWED: ${{ matrix.windowed }}
+        run: |
+          import os
+          import sys
+          import PyInstaller.__main__ as pyi
+
+          version  = os.environ["VERSION"]
+          goos     = os.environ["GOOS"]
+          goarch   = os.environ["GOARCH"]
+          go_asset = os.environ["GO_ASSET"]
+          windowed = os.environ["WINDOWED"].lower() == "true"
+
+          bundle_name = f"HolePunch-{goos}-{goarch}-{version}"
+
+          # PyInstaller uses ";" on Windows, ":" on POSIX.
+          sep = ";" if sys.platform == "win32" else ":"
+
+          args = [
+              "main.py",
+              "--onefile",
+              "--name",            bundle_name,
+              "--add-data",        f"style.qss{sep}.",
+              "--add-data",        f"style_light.qss{sep}.",
+              "--add-data",        f"bin/{go_asset}{sep}.",
+              "--runtime-hook",    "build_hooks/hook_runtime.py",
+              "--hidden-import",   "PyQt6.QtSvg",
+              "--hidden-import",   "PyQt6.QtXml",
+              "--collect-all",     "cryptography",
+              "--noconfirm",
+          ]
+
+          # Suppress the console window on graphical platforms.
+          if windowed:
+              if sys.platform == "win32":
+                  args.append("--noconsole")
+              else:
+                  args.append("--windowed")
+
+          print("Running PyInstaller with args:")
+          for a in args:
+              print(" ", a)
+
+          pyi.run(args)
+
+      # ── Verify the bundle was produced and is a reasonable size ───────────
+      - name: Verify bundle
+        shell: python
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ needs.meta.outputs.version }}
+          EXT: ${{ matrix.goos == 'windows' && '.exe' || '' }}
+        run: |
+          import os, sys
+
+          goos    = os.environ["GOOS"]
+          goarch  = os.environ["GOARCH"]
+          version = os.environ["VERSION"]
+          ext     = ".exe" if goos == "windows" else ""
+
+          name = f"HolePunch-{goos}-{goarch}-{version}{ext}"
+          path = os.path.join("dist", name)
+
+          if not os.path.isfile(path):
+              print(f"ERROR: expected bundle not found: {path}")
+              sys.exit(1)
+
+          size_mb = os.path.getsize(path) / 1_048_576
+          print(f"OK: {path}  ({size_mb:.1f} MiB)")
+
+          if size_mb < 10:
+              print("WARNING: bundle is suspiciously small (< 10 MiB)")
+
+      # ── Upload bundle as artefact for the release job ─────────────────────
+      - name: Upload bundle artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/HolePunch-${{ matrix.goos }}-${{ matrix.goarch }}-${{ needs.meta.outputs.version }}*
+          if-no-files-found: error
+          retention-days: 1
+
+  # --------------------------------------------------------------------------
+  # JOB 3 — Create GitHub Release and attach every artefact
+  # --------------------------------------------------------------------------
+  release:
+    name: Publish GitHub Release
+    needs: [meta, build-go, build-bundle]
+    runs-on: ubuntu-latest
+    # Do not fail the release if triggered manually without a real tag.
+    if: always() && needs.build-bundle.result != 'cancelled'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ── Download every artefact into release-assets/ ──────────────────────
+      - name: Download all artefacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets/
+
+      # Flatten the per-artefact subdirectories into a single directory.
+      - name: Flatten artefact directories
+        run: |
+          mkdir -p flat
+          find release-assets/ -type f -exec cp -v {} flat/ \;
+          echo ""
+          echo "=== Assets to upload ==="
+          ls -lh flat/
+
+      - name: Restore executable bits on POSIX binaries
+        run: |
+          chmod +x \
+            flat/holepunch-linux-* \
+            flat/holepunch-darwin-* \
+            flat/signal-server-linux-* \
+            flat/HolePunch-linux-* \
+            flat/HolePunch-darwin-* \
+            2>/dev/null || true
+
+      # ── Generate changelog from git log between tags ──────────────────────
+      - name: Generate release notes
+        id: notes
+        run: |
+          VERSION="${{ needs.meta.outputs.version }}"
+
+          # Find the previous tag (skip the current one).
+          PREV=$(git tag --sort=-creatordate \
+                 | grep -v "^${VERSION}$" \
+                 | head -n1 || true)
+
+          if [ -n "$PREV" ]; then
+            COMMITS=$(git log --pretty=format:"- %s (%h)" "${PREV}..HEAD")
+          else
+            COMMITS=$(git log --pretty=format:"- %s (%h)")
+          fi
+
+          {
+            echo "## What's Changed"
+            echo ""
+            if [ -n "$COMMITS" ]; then
+              echo "$COMMITS"
+            else
+              echo "- Initial release"
+            fi
+            echo ""
+            echo "---"
+            echo ""
+            echo "## Downloads"
+            echo ""
+            echo "| File | Platform | Notes |"
+            echo "|------|----------|-------|"
+            echo "| \`HolePunch-windows-amd64-${VERSION}.exe\` | Windows x64 | ✅ All-in-one — no prerequisites |"
+            echo "| \`HolePunch-linux-amd64-${VERSION}\` | Linux x64 | ✅ All-in-one bundle |"
+            echo "| \`HolePunch-darwin-arm64-${VERSION}\` | macOS Apple Silicon | ✅ All-in-one bundle |"
+            echo "| \`holepunch-windows-amd64.exe\` | Windows x64 | Go backend only (source installs) |"
+            echo "| \`holepunch-linux-amd64\` | Linux x64 | Go backend only |"
+            echo "| \`holepunch-darwin-arm64\` | macOS Apple Silicon | Go backend only |"
+            echo "| \`signal-server-linux-amd64\` | Linux x64 | Deploy to Cloud Run |"
+            echo ""
+            echo "> **New user?** Download the \`HolePunch-<your-platform>\` bundle."
+            echo "> It contains everything — just run it."
+          } > release_notes.md
+
+          echo "notes_file=release_notes.md" >> "$GITHUB_OUTPUT"
+
+      # ── Publish the release ───────────────────────────────────────────────
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.meta.outputs.version }}
+          name: "HolePunch ${{ needs.meta.outputs.version }}"
+          body_path: ${{ steps.notes.outputs.notes_file }}
+          draft: false
+          # Tags containing "-" (e.g. v1.0.0-beta) are marked as pre-releases.
+          prerelease: ${{ contains(needs.meta.outputs.version, '-') }}
+          fail_on_unmatched_files: false
+          files: flat/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,19 @@
+steps:
+  # Step 1: Build the Docker image
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "build"
+      - "-f"
+      - "cmd/signal-server/Dockerfile"
+      - "-t"
+      - "gcr.io/$PROJECT_ID/holepunch-signal:latest"
+      - "."
+
+  # Step 2: Push the image to Container Registry
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "push"
+      - "gcr.io/$PROJECT_ID/holepunch-signal:latest"
+
+images:
+  - "gcr.io/$PROJECT_ID/holepunch-signal:latest"

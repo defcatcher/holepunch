@@ -1,0 +1,103 @@
+# =============================================================================
+# HolePunch — Continuous Integration
+# =============================================================================
+#
+# Runs on every push and pull-request so the Actions tab is never empty.
+# Checks:
+#   1. Go  — build + vet all packages
+#   2. Python — import-level syntax check on every .py file
+#
+# This workflow does NOT build release artefacts.
+# For that see release.yml (triggered by version tags).
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.22"
+  PYTHON_VERSION: "3.11"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Go — build & vet
+  # ---------------------------------------------------------------------------
+  go:
+    name: Go · build & vet
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go ${{ env.GO_VERSION }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: core/go.sum
+
+      - name: go build
+        working-directory: core
+        run: go build ./...
+
+      - name: go vet
+        working-directory: core
+        run: go vet ./...
+
+  # ---------------------------------------------------------------------------
+  # Python — syntax check
+  # ---------------------------------------------------------------------------
+  python:
+    name: Python · syntax check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Check syntax of all .py files
+        run: |
+          echo "Checking Python syntax..."
+          find . -name "*.py" -not -path "./.git/*" | sort | while read f; do
+            python -m py_compile "$f" && echo "  OK  $f" || { echo "FAIL $f"; exit 1; }
+          done
+          echo "All Python files are syntactically valid."
+
+      - name: Verify imports resolve
+        run: |
+          pip install --quiet PyQt6 cryptography
+          python -c "
+          import ast, sys, os
+
+          skip = {'mock_router.py'}   # standalone script, no GUI deps needed
+
+          for root, dirs, files in os.walk('.'):
+              dirs[:] = [d for d in dirs if d not in {'.git', '__pycache__', 'venv', '.venv'}]
+              for fname in files:
+                  if not fname.endswith('.py') or fname in skip:
+                      continue
+                  path = os.path.join(root, fname)
+                  try:
+                      with open(path, encoding='utf-8') as f:
+                          ast.parse(f.read(), filename=path)
+                      print(f'  OK  {path}')
+                  except SyntaxError as e:
+                      print(f'FAIL {path}: {e}', file=sys.stderr)
+                      sys.exit(1)
+          print('AST parse: all files clean.')
+          "

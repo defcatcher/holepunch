@@ -1,0 +1,86 @@
+QMainWindow, QDialog, QMessageBox, QInputDialog { 
+    background-color: #f5f6fa; 
+    color: #2f3640; 
+}
+QWidget { 
+    color: #2f3640; 
+    font-family: 'Segoe UI', sans-serif; 
+    font-size: 14px; 
+}
+#Sidebar { 
+    background-color: #dcdde1; 
+    border-right: 1px solid #bdc3c7; 
+    min-width: 180px; 
+}
+
+QPushButton { 
+    background-color: transparent; 
+    border: none; 
+    color: #2f3640; 
+    text-align: left; 
+    padding: 12px; 
+    font-size: 14px; 
+    border-radius: 5px; 
+}
+QPushButton:hover { background-color: #bdc3c7; color: #000; }
+QPushButton#NavBtn { background-color: transparent; color: #2f3640; }
+QPushButton#NavBtn[selected="true"] { background-color: #3498db; color: white; font-weight: bold; }
+
+QPushButton#ConnectBtn { background-color: #27ae60; color: white; font-weight: bold; padding: 8px; text-align: center; }
+QPushButton#ConnectBtn:hover { background-color: #2ecc71; }
+
+QPushButton#StartBtn { background-color: #3498db; color: white; font-weight: bold; padding: 15px; border-radius: 8px; text-align: center; }
+QPushButton#StartBtn:disabled { background-color: #bdc3c7; color: #7f8fa6; }
+
+QPushButton#ActionBtn { background-color: #3498db; color: white; padding: 8px; border-radius: 5px; text-align: center; }
+QPushButton#ActionBtn:hover { background-color: #2980b9; }
+
+QPushButton#WarningBtn { background-color: #e67e22; color: white; padding: 8px; border-radius: 5px; text-align: center; }
+QPushButton#WarningBtn:hover { background-color: #d35400; }
+
+QPushButton#SuccessBtn { background-color: #27ae60; color: white; padding: 10px; border-radius: 5px; font-weight: bold; text-align: center; margin-top: 10px; }
+QPushButton#SuccessBtn:hover { background-color: #2ecc71; }
+
+QLineEdit, QComboBox { 
+    background-color: white; 
+    border: 1px solid #bdc3c7; 
+    border-radius: 5px; 
+    padding: 8px; 
+    color: #2f3640; 
+}
+QComboBox::drop-down { border: none; }
+QComboBox QAbstractItemView { 
+    background-color: white; 
+    color: #2f3640; 
+    selection-background-color: #3498db; 
+}
+
+#DropZone { 
+    border: 2px dashed #7f8fa6; 
+    border-radius: 15px; 
+    background-color: white; 
+    color: #7f8fa6; 
+}
+#DropZone[active="true"] { 
+    border-color: #3498db; 
+    background-color: #dff9fb; 
+    color: #3498db; 
+}
+
+QProgressBar { 
+    border: 1px solid #bdc3c7; 
+    border-radius: 5px; 
+    text-align: center; 
+    background-color: #ecf0f1; 
+    color: #2f3640; 
+}
+QProgressBar::chunk { background-color: #3498db; width: 10px; }
+
+QMessageBox QPushButton { 
+    background-color: #ecf0f1; 
+    border: 1px solid #bdc3c7; 
+    text-align: center; 
+    padding: 6px 15px; 
+    min-width: 80px; 
+}
+QMessageBox QPushButton:hover { background-color: #bdc3c7; }

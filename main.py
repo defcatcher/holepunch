@@ -9,6 +9,7 @@ import threading
 import time
 from pathlib import Path
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from src.cipher import FileDecryptor, FileEncryptorThread, FolderEncryptorThread

@@ -80,6 +80,6 @@ QMessageBox QPushButton {
     background-color: #333; 
     text-align: center; 
     padding: 6px 15px; 
-    min-width: 80px; 
+    min-width: 120px; 
 }
 QMessageBox QPushButton:hover { background-color: #444; }

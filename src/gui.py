@@ -281,10 +281,10 @@ class P2PWindow(QMainWindow):
         msg_box.setWindowTitle("Connection Setup")
         msg_box.setText("Do you want to send or receive a file?")
         btn_send = msg_box.addButton(
-            "Send (Generate Code)", QMessageBox.ButtonRole.ActionRole
+            "Generate Code", QMessageBox.ButtonRole.ActionRole
         )
         btn_recv = msg_box.addButton(
-            "Receive (Input Code)", QMessageBox.ButtonRole.ActionRole
+            "Input Code", QMessageBox.ButtonRole.ActionRole
         )
         msg_box.addButton(QMessageBox.StandardButton.Cancel)
 

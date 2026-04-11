@@ -6,8 +6,10 @@ package p2p
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/pion/webrtc/v3"
 )
@@ -42,6 +44,10 @@ func NewDataTransport(dc *webrtc.DataChannel) *DataTransport {
 		done:    make(chan struct{}),
 	}
 
+	// Set the buffered amount low threshold so we can use the callback-based
+	// approach for backpressure instead of polling.
+	dc.SetBufferedAmountLowThreshold(1 * 1024 * 1024) // 1 MB
+
 	// OnMessage is invoked by pion on the goroutine that drains the SCTP layer.
 	// We copy the raw bytes out of msg.Data before returning so that pion is
 	// free to reuse its internal buffer.
@@ -75,7 +81,24 @@ func NewDataTransport(dc *webrtc.DataChannel) *DataTransport {
 
 // Send transmits data as a binary WebRTC DataChannel message.
 // It is safe to call from multiple goroutines concurrently.
+// Before sending, it waits for the buffered amount to drop below a threshold
+// to prevent overflow and connection drops.
 func (t *DataTransport) Send(data []byte) error {
+	// WebRTC DataChannel has a limited send buffer. If we send faster than
+	// the network can deliver, the buffer grows and the connection may drop.
+	// Wait for buffered amount to drain before sending more data.
+	const maxBufferSize = 1 * 1024 * 1024 // 1 MB
+	const pollInterval = 10 * time.Millisecond
+
+	for t.dc.BufferedAmount() >= uint64(maxBufferSize) {
+		select {
+		case <-t.done:
+			return fmt.Errorf("datachannel closed while waiting for buffer drain")
+		case <-time.After(pollInterval):
+			// Buffer draining, continue
+		}
+	}
+
 	return t.dc.Send(data)
 }
 

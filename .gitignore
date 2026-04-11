@@ -14,6 +14,8 @@ venv/
 dist/
 build/
 
+.qwen/
+
 # PyInstaller
 *.spec
 

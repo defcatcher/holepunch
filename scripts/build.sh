@@ -105,22 +105,33 @@ echo -e "${CYAN}═════════════════════�
 echo ""
 
 case "${FILTER}" in
-    all | windows)
+    all)
         build_holepunch windows amd64 .exe
         build_holepunch windows arm64 .exe
-        ;;& # fall-through only when filter=all
-
-    all | darwin)
         build_holepunch darwin amd64
         build_holepunch darwin arm64
-        ;;&
-
-    all | linux)
         build_holepunch linux amd64
         build_holepunch linux arm64
-        ;;&
+        echo ""
+        build_signal
+        ;;
 
-    all | signal)
+    windows)
+        build_holepunch windows amd64 .exe
+        build_holepunch windows arm64 .exe
+        ;;
+
+    darwin)
+        build_holepunch darwin amd64
+        build_holepunch darwin arm64
+        ;;
+
+    linux)
+        build_holepunch linux amd64
+        build_holepunch linux arm64
+        ;;
+
+    signal)
         echo ""
         build_signal
         ;;

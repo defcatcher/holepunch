@@ -13,16 +13,9 @@
 #   release       Create the GitHub Release and attach every artefact.
 #
 # RELEASE ARTEFACTS
-#   HolePunch-windows-amd64-<tag>.exe   ← all-in-one bundle (users download this)
-#   HolePunch-linux-amd64-<tag>
-#   HolePunch-darwin-amd64-<tag>
-#   HolePunch-darwin-arm64-<tag>
-#   holepunch-windows-amd64.exe         ← Go backend only  (developers / CI)
-#   holepunch-windows-arm64.exe
-#   holepunch-darwin-amd64
-#   holepunch-darwin-arm64
-#   holepunch-linux-amd64
-#   holepunch-linux-arm64
+#   HolePunch-windows-amd64-<tag>.exe   ← All-in-one bundle (Windows x64)
+#   HolePunch-linux-amd64-<tag>         ← All-in-one bundle (Linux x64)
+#   HolePunch-darwin-arm64-<tag>        ← All-in-one bundle (macOS Apple Silicon)
 #   signal-server-linux-amd64           ← Cloud Run deployment
 #
 # =============================================================================
@@ -425,7 +418,15 @@ jobs:
       - name: Flatten artefact directories
         run: |
           mkdir -p flat
-          find release-assets/ -type f -exec cp -v {} flat/ \;
+          
+          # Copy only All-in-one bundle files and signal-server
+          echo "=== Copying All-in-one bundles ==="
+          find release-assets/ -type f -name "HolePunch-*" -exec cp -v {} flat/ \;
+          
+          echo ""
+          echo "=== Copying signal-server for Cloud Run ==="
+          find release-assets/ -type f -name "signal-server-*" -exec cp -v {} flat/ \;
+          
           echo ""
           echo "=== Assets to upload ==="
           ls -lh flat/
@@ -433,11 +434,9 @@ jobs:
       - name: Restore executable bits on POSIX binaries
         run: |
           chmod +x \
-            flat/holepunch-linux-* \
-            flat/holepunch-darwin-* \
-            flat/signal-server-linux-* \
             flat/HolePunch-linux-* \
             flat/HolePunch-darwin-* \
+            flat/signal-server-linux-* \
             2>/dev/null || true
 
       # ── Generate changelog from git log between tags ──────────────────────
@@ -472,13 +471,10 @@ jobs:
             echo ""
             echo "| File | Platform | Notes |"
             echo "|------|----------|-------|"
-            echo "| \`HolePunch-windows-amd64-${VERSION}.exe\` | Windows x64 | ✅ All-in-one — no prerequisites |"
+            echo "| \`HolePunch-windows-amd64-${VERSION}.exe\` | Windows x64 | ✅ All-in-one bundle |"
             echo "| \`HolePunch-linux-amd64-${VERSION}\` | Linux x64 | ✅ All-in-one bundle |"
             echo "| \`HolePunch-darwin-arm64-${VERSION}\` | macOS Apple Silicon | ✅ All-in-one bundle |"
-            echo "| \`holepunch-windows-amd64.exe\` | Windows x64 | Go backend only (source installs) |"
-            echo "| \`holepunch-linux-amd64\` | Linux x64 | Go backend only |"
-            echo "| \`holepunch-darwin-arm64\` | macOS Apple Silicon | Go backend only |"
-            echo "| \`signal-server-linux-amd64\` | Linux x64 | Deploy to Cloud Run |"
+            echo "| \`signal-server-linux-amd64\` | Linux x64 | 🚀 Deploy to Cloud Run |"
             echo ""
             echo "> **New user?** Download the \`HolePunch-<your-platform>\` bundle."
             echo "> It contains everything — just run it."

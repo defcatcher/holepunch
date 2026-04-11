@@ -193,6 +193,9 @@ class AppController:
         self.app = QApplication(sys.argv)
         self.view = P2PWindow()
         self.peer_ready = False
+        self.is_sender = False
+        self.is_receiver = False
+        self.transfer_pending = False  # metadata sent, waiting for receiver ready
         self.total_transfer_size = 0
         self.transfer_start_time = 0.0
 
@@ -300,6 +303,8 @@ class AppController:
         if code.startswith("HOST:"):
             actual_code = code[len("HOST:") :]
             self.view.active_code = actual_code
+            self.is_sender = True
+            self.is_receiver = False
             self.ipc.send_json(
                 {
                     "type": "connect",
@@ -308,6 +313,8 @@ class AppController:
                 }
             )
         else:
+            self.is_receiver = True
+            self.is_sender = False
             self.ipc.send_json(
                 {
                     "type": "connect",
@@ -316,17 +323,25 @@ class AppController:
                 }
             )
 
+        self.view.update_transfer_status("peer_connecting")
+
         if hasattr(self, "selected_file"):
             self.view.start_btn.setEnabled(True)
 
     def run_transfer(self) -> None:
+        if not hasattr(self, "selected_file"):
+            self.view.file_info.setText("❌ Error: No file selected!")
+            return
+
         pwd = self.view.pwd_input.text()
         if len(pwd) < 8:
-            self.view.file_info.setText("Error: Password must be at least 8 chars!")
+            self.view.file_info.setText("❌ Error: Password must be at least 8 chars!")
             return
 
         self.view.start_btn.setEnabled(False)
-        self.view.file_info.setText("Sending metadata… Waiting for peer.")
+        self.transfer_pending = True
+        self.view.file_info.setText("📤 Sending file info… waiting for receiver…")
+        self.view.update_transfer_status("metadata_sent")
 
         self.total_transfer_size = get_path_size(self.selected_file)
         name = os.path.basename(self.selected_file)
@@ -345,7 +360,11 @@ class AppController:
         msg_type = msg.get("type")
 
         if msg_type == "ready":
-            self.start_encryption()
+            # Only start encryption if we're the sender AND we're waiting for
+            # the receiver to accept (transfer_pending flag is set).
+            if self.is_sender and self.transfer_pending:
+                self.transfer_pending = False
+                self.start_encryption()
         elif msg_type == "metadata":
             self.handle_incoming_metadata(msg)
         elif msg_type == "error":
@@ -359,33 +378,42 @@ class AppController:
             self.view.status_peer.setStyleSheet(
                 "color: #f1c40f; padding: 5px 10px; font-size: 11px;"
             )
+            self.view.update_transfer_status("peer_connecting")
         elif value == "connected":
             self.view.status_peer.setText("👤 Peer: Connected ✓")
             self.view.status_peer.setStyleSheet(
                 "color: #2ecc71; padding: 5px 10px; font-size: 11px; font-weight: bold;"
             )
+            self.view.update_transfer_status("peer_connected")
         elif value == "disconnected":
             self.view.status_peer.setText("👤 Peer: Disconnected")
             self.view.status_peer.setStyleSheet(
                 "color: #e74c3c; padding: 5px 10px; font-size: 11px;"
             )
+            self.view.update_transfer_status("disconnected")
+            self.transfer_pending = False
             self.view.start_btn.setEnabled(True)
         elif value == "finished":
             self.view.status_peer.setText("👤 Peer: Transfer complete")
             self.view.status_peer.setStyleSheet(
                 "color: #2ecc71; padding: 5px 10px; font-size: 11px;"
             )
+            self.view.update_transfer_status("transfer_complete")
         elif value == "error":
             self.view.status_peer.setText("👤 Peer: Error")
             self.view.status_peer.setStyleSheet(
                 "color: #e74c3c; padding: 5px 10px; font-size: 11px;"
             )
+            self.view.update_transfer_status("error")
+            self.transfer_pending = False
             self.view.start_btn.setEnabled(True)
 
     def handle_remote_error(self, err_msg: str) -> None:
         if hasattr(self, "worker") and self.worker.isRunning():
             self.worker.stop()
-        self.view.file_info.setText(f"Peer Error: {err_msg}")
+        self.transfer_pending = False
+        self.view.file_info.setText(f"❌ Error: {err_msg}")
+        self.view.update_transfer_status("error")
         self.view.start_btn.setEnabled(True)
 
     def handle_incoming_metadata(self, msg: dict) -> None:
@@ -394,11 +422,24 @@ class AppController:
         current_pwd = self.view.pwd_input.text()
         default_dir = self.view.path_input.text()
 
+        if filesize < 1024:
+            size_str = f"{filesize} B"
+        elif filesize < 1024 * 1024:
+            size_str = f"{round(filesize / 1024, 2)} KB"
+        elif filesize < 1024 * 1024 * 1024:
+            size_str = f"{round(filesize / (1024 * 1024), 2)} MB"
+        else:
+            size_str = f"{round(filesize / (1024 * 1024 * 1024), 2)} GB"
+
+        self.view.file_info.setText(f"📥 Incoming: {filename} ({size_str})")
+        self.view.update_transfer_status("metadata_received")
+
         pwd, save_path = self.view.ask_receive_file(
             filename, filesize, current_pwd, default_dir
         )
         if not pwd or not save_path:
-            self.view.file_info.setText("Transfer rejected by user.")
+            self.view.file_info.setText("❌ Transfer rejected.")
+            self.view.update_transfer_status("rejected")
             self.ipc.send_json({"type": "error", "msg": "Transfer rejected by user"})
             return
 
@@ -408,18 +449,22 @@ class AppController:
             self.expected_size = filesize
             self.received_size = 0
             self.transfer_start_time = time.time()
-            self.view.file_info.setText(f"Receiving {filename}…")
+            self.view.file_info.setText(f"📥 Receiving {filename}…")
+            self.view.update_transfer_status("receiving")
             self.view.progress_bar.setValue(0)
             self.ipc.send_json({"type": "ready"})
         except Exception as exc:
-            self.view.file_info.setText(f"Decryption setup error: {exc}")
+            self.view.file_info.setText(f"❌ Decryption setup error: {exc}")
+            self.view.update_transfer_status("error")
+            self.ipc.send_json({"type": "error", "msg": f"Decryption setup error: {exc}"})
 
     def on_ipc_chunk(self, data: bytes) -> None:
         if not hasattr(self, "decryptor"):
             return
 
         if not self.decryptor.process_chunk(data):
-            self.view.file_info.setText("Error: Wrong Password or PIN mismatch")
+            self.view.file_info.setText("❌ Wrong Password or PIN mismatch!")
+            self.view.update_transfer_status("decryption_error")
             save_path = self.decryptor.save_path
             self.decryptor.close()
             del self.decryptor
@@ -440,16 +485,24 @@ class AppController:
                 speed = self.received_size / elapsed
                 eta = (self.expected_size - self.received_size) / speed if speed > 0 else 0
                 speed_str, eta_str = format_speed_eta(speed, eta)
-                self.view.file_info.setText(f"Receiving... {speed_str} | ETA: {eta_str}")
+                received_display = self._format_size(self.received_size)
+                expected_display = self._format_size(self.expected_size)
+                self.view.file_info.setText(
+                    f"📥 {percent}% | {speed_str} | ETA: {eta_str} ({received_display}/{expected_display})"
+                )
+                self.view.update_transfer_status("receiving")
 
             if self.received_size >= self.expected_size:
-                self.view.file_info.setText("Successfully received!")
+                self.view.file_info.setText("✅ Successfully received!")
+                self.view.update_transfer_status("transfer_complete")
+                self.view.progress_bar.setValue(100)
                 self.view.show_notification("Transfer Complete", "File has been successfully received.")
                 self.decryptor.close()
                 del self.decryptor
 
     def start_encryption(self) -> None:
-        self.view.file_info.setText("Encrypting and sending…")
+        self.view.file_info.setText("🔒 Encrypting and sending…")
+        self.view.update_transfer_status("sending")
         pwd = self.view.pwd_input.text()
         pin_code = self.view.active_code
 
@@ -470,25 +523,41 @@ class AppController:
         if self.total_transfer_size > 0:
             percent = int((processed_size / self.total_transfer_size) * 100)
             self.view.progress_bar.setValue(min(100, percent))
-            
+
             elapsed = time.time() - self.transfer_start_time
             if elapsed > 0.5:
                 speed = processed_size / elapsed
                 eta = (self.total_transfer_size - processed_size) / speed if speed > 0 else 0
                 speed_str, eta_str = format_speed_eta(speed, eta)
-                self.view.file_info.setText(f"Sending... {speed_str} | ETA: {eta_str}")
+                self.view.file_info.setText(f"📤 {percent}% | {speed_str} | ETA: {eta_str}")
+                self.view.update_transfer_status("sending")
 
     def send_chunk_to_go(self, chunk_data: bytes) -> None:
         self.ipc.send_chunk(chunk_data)
 
     def on_transfer_complete(self) -> None:
-        self.view.file_info.setText("Successfully transmitted!")
+        self.view.file_info.setText("✅ Successfully transmitted!")
+        self.view.update_transfer_status("transfer_complete")
+        self.view.progress_bar.setValue(100)
         self.view.start_btn.setEnabled(True)
         self.view.show_notification("Transfer Complete", "File has been successfully sent.")
 
     def on_transfer_error(self, err_msg: str) -> None:
-        self.view.file_info.setText(f"Error: {err_msg}")
+        self.view.file_info.setText(f"❌ Error: {err_msg}")
+        self.view.update_transfer_status("error")
         self.view.start_btn.setEnabled(True)
+
+    @staticmethod
+    def _format_size(size_bytes: int) -> str:
+        """Format byte size into human-readable string."""
+        if size_bytes < 1024:
+            return f"{size_bytes} B"
+        elif size_bytes < 1024 * 1024:
+            return f"{round(size_bytes / 1024, 2)} KB"
+        elif size_bytes < 1024 * 1024 * 1024:
+            return f"{round(size_bytes / (1024 * 1024), 2)} MB"
+        else:
+            return f"{round(size_bytes / (1024 * 1024 * 1024), 2)} GB"
 
     def run(self) -> None:
         self.view.show()

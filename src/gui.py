@@ -129,8 +129,21 @@ class P2PWindow(QMainWindow):
             "color: #7f8c8d; padding: 5px 10px; font-size: 11px;"
         )
 
+        # Transfer status log (detailed activity feed)
+        self.transfer_log = QLabel()
+        self.transfer_log.setObjectName("TransferLog")
+        self.transfer_log.setWordWrap(True)
+        self.transfer_log.setStyleSheet(
+            "color: #95a5a6; padding: 5px 10px; font-size: 10px; "
+            "border-top: 1px solid #34495e; margin-top: 5px;"
+        )
+        self.transfer_log.setText("📋 Activity log will appear here")
+        self.transfer_log.setMinimumHeight(60)
+        self.transfer_log.setMaximumHeight(100)
+
         sidebar_layout.addWidget(self.status_ipc)
         sidebar_layout.addWidget(self.status_peer)
+        sidebar_layout.addWidget(self.transfer_log)
 
         self.content_area = QStackedWidget()
 
@@ -379,6 +392,25 @@ class P2PWindow(QMainWindow):
 
     def load_signal_url(self, url: str):
         self.signal_url_input.setText(url)
+
+    def update_transfer_status(self, status: str):
+        """Update the transfer activity log in the sidebar with detailed status."""
+        status_messages = {
+            "peer_connecting": "🔄 Connecting to peer…",
+            "peer_connected": "✅ Peer connected",
+            "metadata_sent": "📤 File info sent, waiting for receiver…",
+            "metadata_received": "📥 File info received",
+            "receiving": "📥 Receiving file…",
+            "sending": "📤 Sending file…",
+            "transfer_complete": "✅ Transfer complete",
+            "disconnected": "❌ Peer disconnected",
+            "error": "❌ Error occurred",
+            "rejected": "❌ Transfer rejected",
+            "decryption_error": "❌ Decryption failed",
+        }
+        msg = status_messages.get(status, status)
+        self.transfer_log.setText(msg)
+        self.transfer_log.adjustSize()
 
     def load_styles(self):
         self.change_theme("Dark")

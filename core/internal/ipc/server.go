@@ -75,7 +75,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 // ---------------------------------------------------------------------------
 
 // session holds all mutable state for one live Python IPC connection.
-// Fields guarded by wMu (write path) or enMu (engine/cancel) are noted inline.
+// Fields guarded by wMu (write path) or enMu (engine/cancel/dcReady) are noted inline.
 type session struct {
 	conn net.Conn
 	srv  *Server
@@ -84,11 +84,12 @@ type session struct {
 	// other than the read loop, so every write must hold this mutex.
 	wMu sync.Mutex
 
-	// enMu guards engine and cancel. Both are set together inside handleConnect
-	// and torn down together inside closeEngine.
-	enMu   sync.Mutex
-	engine *p2p.Engine
-	cancel context.CancelFunc
+	// enMu guards engine, cancel, and dcReady. All three are set together
+	// inside handleConnect and torn down together inside closeEngine.
+	enMu    sync.Mutex
+	engine  *p2p.Engine
+	cancel  context.CancelFunc
+	dcReady bool // true only when OnConnected fires
 }
 
 // writeJSON marshals v and sends it as a length-prefixed IPC frame.
@@ -126,6 +127,7 @@ func (s *session) closeEngine() {
 	cancel := s.cancel
 	s.engine = nil
 	s.cancel = nil
+	s.dcReady = false
 	s.enMu.Unlock()
 
 	if cancel != nil {
@@ -203,15 +205,24 @@ func (sess *session) dispatch(ctx context.Context, payload []byte) {
 	// DataChannel binary frame.
 	sess.enMu.Lock()
 	eng := sess.engine
+	ready := sess.dcReady
 	sess.enMu.Unlock()
 
 	if eng == nil {
 		slog.Warn("ipc: binary chunk received before TypeConnect — dropping",
 			"bytes", len(payload))
+		sess.writeJSON(models.NewError("transfer not started: no active connection"))
+		return
+	}
+	if !ready {
+		slog.Warn("ipc: binary chunk received before DataChannel ready — dropping",
+			"bytes", len(payload))
+		sess.writeJSON(models.NewError("transfer not ready: DataChannel not open yet"))
 		return
 	}
 	if err := eng.Send(payload); err != nil {
 		slog.Warn("ipc: Engine.Send failed", "err", err)
+		sess.writeJSON(models.NewError(fmt.Sprintf("chunk send failed: %s", err)))
 	}
 }
 
@@ -286,6 +297,9 @@ func (sess *session) handleConnect(ctx context.Context, msg models.ConnectMsg) {
 
 	eng.OnConnected = func() {
 		slog.Info("ipc: DataChannel open — sending status:connected to Python")
+		sess.enMu.Lock()
+		sess.dcReady = true
+		sess.enMu.Unlock()
 		sess.writeJSON(models.NewStatus(models.StatusConnected))
 	}
 

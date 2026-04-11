@@ -1,12 +1,13 @@
 import os
 import tarfile
+import weakref
 from PyQt6.QtCore import QThread, pyqtSignal
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 from cryptography.exceptions import InvalidTag
 
-CHUNK_SIZE = 64 * 1024
+CHUNK_SIZE = 60 * 1024
 
 def generate_key(password: str, salt: str) -> bytes:
     kdf = PBKDF2HMAC(
@@ -63,16 +64,18 @@ class EmitterStream:
         self.thread = encryptor_thread
         self.buffer = bytearray()
         self.processed_size = 0
+        self.max_buffer_size = CHUNK_SIZE * 4  # Prevent unbounded growth
 
     def write(self, data: bytes):
         if not self.thread.is_running:
             return len(data)
 
         self.buffer.extend(data)
-        
+
+        # Process chunks while buffer has enough data
         while len(self.buffer) >= CHUNK_SIZE and self.thread.is_running:
             chunk = bytes(self.buffer[:CHUNK_SIZE])
-            del self.buffer[:CHUNK_SIZE]
+            del self.buffer[:CHUNK_SIZE]  # In-place deletion to avoid creating new bytearray
 
             nonce = os.urandom(12)
             encrypted_chunk = self.thread.aesgcm.encrypt(nonce, chunk, None)
@@ -80,6 +83,10 @@ class EmitterStream:
 
             self.processed_size += len(chunk)
             self.thread.progress.emit(self.processed_size)
+
+        # Safety check: if buffer gets too large, flush it all
+        if len(self.buffer) > self.max_buffer_size:
+            self.flush()
 
         return len(data)
 
@@ -131,8 +138,28 @@ class FileDecryptor:
         self.key = generate_key(password, pin_code)
         self.aesgcm = AESGCM(self.key)
         self.file = open(self.save_path, 'wb')
+        self._closed = False
+        # Use weakref.finalize as a safety net if close() is never called
+        self._finalizer = weakref.finalize(self, self._finalize, self.file)
+
+    @staticmethod
+    def _finalize(file_obj):
+        if not file_obj.closed:
+            try:
+                file_obj.close()
+            except Exception:
+                pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
 
     def process_chunk(self, payload: bytes) -> bool:
+        if self._closed:
+            return False
         nonce = payload[:12]
         ciphertext = payload[12:]
         try:
@@ -143,5 +170,7 @@ class FileDecryptor:
             return False
 
     def close(self):
-        if not self.file.closed:
+        if not self._closed and not self.file.closed:
             self.file.close()
+            self._closed = True
+            self._finalizer.atexit = False  # Disable finalizer since we closed manually

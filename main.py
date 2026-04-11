@@ -204,6 +204,7 @@ class AppController:
         self.view.peer_connected.connect(self.on_peer_ready)
         self.view.start_btn.clicked.connect(self.run_transfer)
         self.view.btn_apply_port.clicked.connect(self.change_ipc_port)
+        self.view.window_closing.connect(self.on_window_closing)
 
         try:
             _start_go_backend()
@@ -246,7 +247,7 @@ class AppController:
                 "color: #f1c40f; padding: 5px 10px; font-size: 11px;"
             )
             self.ipc.stop()
-            self.ipc.wait()
+            self.ipc.wait(5000)
             self.init_ipc(new_port)
 
     def apply_signal_url(self, url: str) -> None:
@@ -259,7 +260,7 @@ class AppController:
                 "color: #f1c40f; padding: 5px 10px; font-size: 11px;"
             )
             self.ipc.stop()
-            self.ipc.wait()
+            self.ipc.wait(5000)
             _stop_go_backend()
             _start_go_backend()
             _, port_str = IPC_ADDR.rsplit(":", 1)
@@ -338,6 +339,11 @@ class AppController:
             self.view.file_info.setText("❌ Error: Password must be at least 8 chars!")
             return
 
+        # Clean up any existing worker before starting a new one
+        if hasattr(self, "worker") and self.worker.isRunning():
+            self.worker.stop()
+            self.worker.wait(5000)
+
         self.view.start_btn.setEnabled(False)
         self.transfer_pending = True
         self.view.file_info.setText("📤 Sending file info… waiting for receiver…")
@@ -411,6 +417,7 @@ class AppController:
     def handle_remote_error(self, err_msg: str) -> None:
         if hasattr(self, "worker") and self.worker.isRunning():
             self.worker.stop()
+            self.worker.wait(5000)  # Wait for thread to finish (5s timeout)
         self.transfer_pending = False
         self.view.file_info.setText(f"❌ Error: {err_msg}")
         self.view.update_transfer_status("error")
@@ -514,7 +521,7 @@ class AppController:
             self.worker = FileEncryptorThread(self.selected_file, pwd, pin_code)
 
         self.worker.progress.connect(self.on_send_progress)
-        self.worker.chunk_ready.connect(self.send_chunk_to_go)
+        self.worker.chunk_ready.connect(self.send_chunk_to_go, Qt.ConnectionType.DirectConnection)
         self.worker.finished.connect(self.on_transfer_complete)
         self.worker.error.connect(self.on_transfer_error)
         self.worker.start()
@@ -526,8 +533,9 @@ class AppController:
 
             elapsed = time.time() - self.transfer_start_time
             if elapsed > 0.5:
-                speed = processed_size / elapsed
-                eta = (self.total_transfer_size - processed_size) / speed if speed > 0 else 0
+                speed = processed_size / elapsed  # Effective throughput (useful data)
+                remaining = self.total_transfer_size - processed_size
+                eta = remaining / speed if speed > 0 else 0
                 speed_str, eta_str = format_speed_eta(speed, eta)
                 self.view.file_info.setText(f"📤 {percent}% | {speed_str} | ETA: {eta_str}")
                 self.view.update_transfer_status("sending")
@@ -547,6 +555,47 @@ class AppController:
         self.view.update_transfer_status("error")
         self.view.start_btn.setEnabled(True)
 
+    def on_window_closing(self) -> None:
+        """Handle window close event to ensure orderly shutdown of all resources."""
+        # Stop any running worker thread
+        if hasattr(self, "worker") and self.worker.isRunning():
+            self.worker.stop()
+            self.worker.wait(5000)
+
+        # Close any open decryptor
+        if hasattr(self, "decryptor"):
+            try:
+                self.decryptor.close()
+            except Exception:
+                pass
+
+        # Stop IPC connection
+        if hasattr(self, "ipc"):
+            self.ipc.stop()
+            self.ipc.wait(5000)
+
+    def _shutdown(self) -> None:
+        """Shut down all resources orderly."""
+        # Stop any running worker thread
+        if hasattr(self, "worker") and self.worker.isRunning():
+            self.worker.stop()
+            self.worker.wait(5000)
+
+        # Close any open decryptor
+        if hasattr(self, "decryptor"):
+            try:
+                self.decryptor.close()
+            except Exception:
+                pass
+
+        # Stop IPC connection
+        if hasattr(self, "ipc"):
+            self.ipc.stop()
+            self.ipc.wait(5000)
+
+        # Stop Go backend
+        _stop_go_backend()
+
     @staticmethod
     def _format_size(size_bytes: int) -> str:
         """Format byte size into human-readable string."""
@@ -561,7 +610,10 @@ class AppController:
 
     def run(self) -> None:
         self.view.show()
-        sys.exit(self.app.exec())
+        exit_code = self.app.exec()
+        # Ensure clean shutdown before exiting
+        self._shutdown()
+        sys.exit(exit_code)
 
 
 if __name__ == "__main__":

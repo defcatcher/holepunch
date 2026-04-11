@@ -2,8 +2,8 @@ import os
 import secrets
 import string
 
-from PyQt6.QtCore import QRegularExpression, Qt, pyqtSignal
-from PyQt6.QtGui import QIntValidator, QRegularExpressionValidator
+from PyQt6.QtCore import QRegularExpression, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QIntValidator, QCloseEvent, QRegularExpressionValidator
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -82,6 +82,7 @@ class CodeInputDialog(QDialog):
 
 class P2PWindow(QMainWindow):
     peer_connected = pyqtSignal(str)
+    window_closing = pyqtSignal()  # Signal to notify controller about window close
 
     def __init__(self):
         super().__init__()
@@ -361,9 +362,12 @@ class P2PWindow(QMainWindow):
         alphabet = string.ascii_letters + string.digits + "!@#$%^&*()-_=+"
         pwd = "".join(secrets.choice(alphabet) for _ in range(16))
         self.pwd_input.setText(pwd)
-        QApplication.clipboard().setText(pwd)
+        clipboard = QApplication.clipboard()
+        clipboard.setText(pwd)
+        # Schedule clipboard clear after 60 seconds to limit password exposure
+        QTimer.singleShot(60000, clipboard.clear)
         QMessageBox.information(
-            self, "Copied", "Secure password generated and copied to clipboard!"
+            self, "Copied", "Secure password generated and copied to clipboard!\n(Password will be cleared from clipboard in 60 seconds)"
         )
 
     def switch_page(self, page, button):
@@ -418,3 +422,17 @@ class P2PWindow(QMainWindow):
     def show_notification(self, title: str, message: str):
         if self.tray_icon.isVisible():
             self.tray_icon.showMessage(title, message, QSystemTrayIcon.MessageIcon.Information, 4000)
+
+    def clear_clipboard_password(self):
+        """Clear any password from the clipboard for security."""
+        QApplication.clipboard().clear()
+
+    def closeEvent(self, event: QCloseEvent):
+        """Handle window close event to ensure orderly shutdown."""
+        # Notify controller to clean up resources (IPC, workers, decryptor)
+        self.window_closing.emit()
+        # Hide tray icon
+        if hasattr(self, 'tray_icon'):
+            self.tray_icon.hide()
+        # Accept the close event
+        event.accept()

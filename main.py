@@ -8,8 +8,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from src.cipher import FileDecryptor, FileEncryptorThread, FolderEncryptorThread
@@ -367,9 +366,7 @@ class AppController:
         msg_type = msg.get("type")
 
         if msg_type == "ready":
-            # Only start encryption if we're the sender AND we're waiting for
-            # the receiver to accept (transfer_pending flag is set).
-            if self.is_sender and self.transfer_pending:
+            if self.transfer_pending:
                 self.transfer_pending = False
                 self.start_encryption()
         elif msg_type == "metadata":
@@ -460,7 +457,7 @@ class AppController:
             self.view.file_info.setText(f"📥 Receiving {filename}…")
             self.view.update_transfer_status("receiving")
             self.view.progress_bar.setValue(0)
-            self.ipc.send_json({"type": "ready"})
+            QTimer.singleShot(500, lambda: self.ipc.send_json({"type": "ready"}))
         except Exception as exc:
             self.view.file_info.setText(f"❌ Decryption setup error: {exc}")
             self.view.update_transfer_status("error")
@@ -486,19 +483,23 @@ class AppController:
         self.received_size += max(0, len(data) - 28)
         if self.expected_size > 0:
             percent = int((self.received_size / self.expected_size) * 100)
-            self.view.progress_bar.setValue(min(100, percent))
 
-            elapsed = time.time() - self.transfer_start_time
-            if elapsed > 0.5:
-                speed = self.received_size / elapsed
-                eta = (self.expected_size - self.received_size) / speed if speed > 0 else 0
-                speed_str, eta_str = format_speed_eta(speed, eta)
-                received_display = self._format_size(self.received_size)
-                expected_display = self._format_size(self.expected_size)
-                self.view.file_info.setText(
-                    f"📥 {percent}% | {speed_str} | ETA: {eta_str} ({received_display}/{expected_display})"
-                )
-                self.view.update_transfer_status("receiving")
+            now = time.time()
+            if now - getattr(self, 'last_ui_update_time', 0) > 0.5:
+                self.last_ui_update_time = now
+                self.view.progress_bar.setValue(min(100, percent))
+
+                elapsed = now - self.transfer_start_time
+                if elapsed > 0:
+                    speed = self.received_size / elapsed
+                    eta = (self.expected_size - self.received_size) / speed if speed > 0 else 0
+                    speed_str, eta_str = format_speed_eta(speed, eta)
+                    received_display = self._format_size(self.received_size)
+                    expected_display = self._format_size(self.expected_size)
+                    self.view.file_info.setText(
+                        f"📥 {percent}% | {speed_str} | ETA: {eta_str} ({received_display}/{expected_display})"
+                    )
+                    self.view.update_transfer_status("receiving")
 
             if self.received_size >= self.expected_size:
                 self.view.file_info.setText("✅ Successfully received!")
@@ -527,19 +528,23 @@ class AppController:
         self.worker.error.connect(self.on_transfer_error)
         self.worker.start()
 
-    def on_send_progress(self, processed_size: int) -> None:
+    def on_send_progress(self, processed_size) -> None:
         if self.total_transfer_size > 0:
             percent = int((processed_size / self.total_transfer_size) * 100)
-            self.view.progress_bar.setValue(min(100, percent))
 
-            elapsed = time.time() - self.transfer_start_time
-            if elapsed > 0.5:
-                speed = processed_size / elapsed  # Effective throughput (useful data)
-                remaining = self.total_transfer_size - processed_size
-                eta = remaining / speed if speed > 0 else 0
-                speed_str, eta_str = format_speed_eta(speed, eta)
-                self.view.file_info.setText(f"📤 {percent}% | {speed_str} | ETA: {eta_str}")
-                self.view.update_transfer_status("sending")
+            now = time.time()
+            if now - getattr(self, 'last_ui_update_time', 0) > 0.5:
+                self.last_ui_update_time = now
+                self.view.progress_bar.setValue(min(100, percent))
+
+                elapsed = now - self.transfer_start_time
+                if elapsed > 0:
+                    speed = processed_size / elapsed  # Effective throughput (useful data)
+                    remaining = self.total_transfer_size - processed_size
+                    eta = remaining / speed if speed > 0 else 0
+                    speed_str, eta_str = format_speed_eta(speed, eta)
+                    self.view.file_info.setText(f"📤 {percent}% | {speed_str} | ETA: {eta_str}")
+                    self.view.update_transfer_status("sending")
 
     def send_chunk_to_go(self, chunk_data: bytes) -> None:
         self.ipc.send_chunk(chunk_data)

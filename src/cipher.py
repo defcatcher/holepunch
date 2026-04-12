@@ -7,7 +7,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 from cryptography.exceptions import InvalidTag
 
-CHUNK_SIZE = 60 * 1024
+CHUNK_SIZE = 16 * 1024
 
 def generate_key(password: str, salt: str) -> bytes:
     kdf = PBKDF2HMAC(
@@ -19,7 +19,7 @@ def generate_key(password: str, salt: str) -> bytes:
     return kdf.derive(password.encode('utf-8'))
 
 class FileEncryptorThread(QThread):
-    progress = pyqtSignal(int)
+    progress = pyqtSignal(object)
     chunk_ready = pyqtSignal(bytes)
     finished = pyqtSignal()
     error = pyqtSignal(str)
@@ -101,7 +101,7 @@ class EmitterStream:
             self.thread.progress.emit(self.processed_size)
 
 class FolderEncryptorThread(QThread):
-    progress = pyqtSignal(int)
+    progress = pyqtSignal(object)
     chunk_ready = pyqtSignal(bytes)
     finished = pyqtSignal()
     error = pyqtSignal(str)

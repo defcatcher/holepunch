@@ -52,7 +52,7 @@ class IPCClientThread(QThread):
                         text = data.decode('utf-8')
                         msg = json.loads(text)
                         self.json_received.emit(msg)
-                    except (UnicodeDecodeError, json.JSONDecodeError):
+                    except (UnicodeDecodeError, json.JSONDecodeError) as e:
                         self.chunk_received.emit(data)
 
             except ConnectionRefusedError:

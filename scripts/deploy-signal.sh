@@ -82,14 +82,14 @@ ok "APIs enabled."
 # ── Build & push image via Cloud Build ───────────────────────────────────────
 # We pass the Dockerfile path explicitly so Cloud Build can find it inside
 # the core/ build context without a top-level Dockerfile.
-
 step "Building Docker image with Cloud Build (this may take ~2 min on first run)…"
+cp "${BUILD_CONTEXT}/cmd/signal-server/Dockerfile" "${BUILD_CONTEXT}/Dockerfile"
+
 gcloud builds submit "${BUILD_CONTEXT}" \
   --tag "${IMAGE}" \
-  --dockerfile "${BUILD_CONTEXT}/cmd/signal-server/Dockerfile" \
   --project "${PROJECT_ID}"
+rm "${BUILD_CONTEXT}/Dockerfile"
 ok "Image pushed: ${IMAGE}"
-
 # ── Deploy to Cloud Run ───────────────────────────────────────────────────────
 
 step "Deploying to Cloud Run (${REGION})…"

@@ -18,7 +18,7 @@ class IPCClientThread(QThread):
         self.port = port
         self.sock = None
         self.running = False
-        self._lock = threading.Lock() # Додано м'ютекс для потокобезпеки
+        self._lock = threading.Lock() # Added mutex for thread safety
         # Safety net: ensure socket is closed if stop() is never called
         self._finalizer = weakref.finalize(self, self._finalize_socket, self.port)
 
@@ -47,7 +47,7 @@ class IPCClientThread(QThread):
                     if not data:
                         break
 
-                    # TODO: Для надійності варто перейти на байт-префікс (напр. 0x01 - JSON, 0x02 - Chunk)
+                    # TODO: For reliability, switch to a byte prefix (e.g. 0x01 - JSON, 0x02 - Chunk)
                     try:
                         text = data.decode('utf-8')
                         msg = json.loads(text)
@@ -77,7 +77,7 @@ class IPCClientThread(QThread):
         pos = 0
         while pos < n:
             try:
-                # Перевіряємо наявність сокета без блокування, щоб уникнути помилок при розриві
+                # Check socket presence without locking to avoid errors on disconnect
                 if not self.sock:
                     return None
                 nbytes = self.sock.recv_into(view[pos:], n - pos)
@@ -96,7 +96,7 @@ class IPCClientThread(QThread):
         self._send_payload(data)
 
     def _send_payload(self, payload: bytes):
-        with self._lock: # Блокуємо доступ до сокета
+        with self._lock: # Lock access to the socket
             if not self.running or not self.sock:
                 return
             

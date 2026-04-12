@@ -3,6 +3,7 @@ import json
 import os
 import platform
 import socket
+import secrets
 import subprocess
 import sys
 import threading
@@ -203,6 +204,8 @@ class AppController:
         self.view.connect_btn.clicked.connect(self.view.show_connect_dialog)
         self.view.peer_connected.connect(self.on_peer_ready)
         self.view.start_btn.clicked.connect(self.run_transfer)
+        self.view.reconnect_btn.clicked.connect(self.reconnect_peer)
+        self.view.cancel_btn.clicked.connect(self.cancel_transfer)
         self.view.btn_apply_port.clicked.connect(self.change_ipc_port)
         self.view.window_closing.connect(self.on_window_closing)
 
@@ -295,7 +298,7 @@ class AppController:
     def on_file_selected(self, path: str) -> None:
         self.selected_file = path
         self.view.file_info.setText(f"Selected: {os.path.basename(path)}")
-        if self.peer_ready:
+        if "Connected" in self.view.status_peer.text():
             self.view.start_btn.setEnabled(True)
 
     def on_peer_ready(self, code: str) -> None:
@@ -326,8 +329,27 @@ class AppController:
 
         self.view.update_transfer_status("peer_connecting")
 
-        if hasattr(self, "selected_file"):
-            self.view.start_btn.setEnabled(True)
+    def reconnect_peer(self) -> None:
+        if not self.is_sender:
+            return
+
+        self.view.reconnect_btn.setVisible(False)
+        self.view.start_btn.setEnabled(False)
+
+        new_code = f"{secrets.randbelow(900) + 100:03d}-{secrets.randbelow(900) + 100:03d}"
+        self.view.my_peer_code = new_code
+        self.view.active_code = new_code
+
+        self.view.connect_btn.setText(f"Your Code: {new_code}")
+        self.view.file_info.setText("🔄 Generating new session...")
+        self.view.update_transfer_status("peer_connecting")
+        self.view.status_peer.setText("👤 Peer: Waiting...")
+        self.view.status_peer.setStyleSheet("color: #f1c40f; padding: 5px 10px; font-size: 11px;")
+        self.ipc.send_json({
+            "type": "connect",
+            "code": new_code,
+            "role": "sender",
+        })
 
     def run_transfer(self) -> None:
         if not hasattr(self, "selected_file"):
@@ -339,7 +361,6 @@ class AppController:
             self.view.file_info.setText("❌ Error: Password must be at least 8 chars!")
             return
 
-        # Clean up any existing worker before starting a new one
         if hasattr(self, "worker") and self.worker.isRunning():
             self.worker.stop()
             self.worker.wait(5000)
@@ -389,6 +410,9 @@ class AppController:
                 "color: #2ecc71; padding: 5px 10px; font-size: 11px; font-weight: bold;"
             )
             self.view.update_transfer_status("peer_connected")
+            self.view.reconnect_btn.setVisible(False)
+            if hasattr(self, "selected_file"):
+                self.view.start_btn.setEnabled(True)
         elif value == "disconnected":
             self.view.status_peer.setText("👤 Peer: Disconnected")
             self.view.status_peer.setStyleSheet(
@@ -396,7 +420,9 @@ class AppController:
             )
             self.view.update_transfer_status("disconnected")
             self.transfer_pending = False
-            self.view.start_btn.setEnabled(True)
+            self.view.start_btn.setEnabled(False)
+            if self.view.active_code and self.is_sender:
+                self.view.reconnect_btn.setVisible(True)
         elif value == "finished":
             self.view.status_peer.setText("👤 Peer: Transfer complete")
             self.view.status_peer.setStyleSheet(
@@ -410,16 +436,77 @@ class AppController:
             )
             self.view.update_transfer_status("error")
             self.transfer_pending = False
-            self.view.start_btn.setEnabled(True)
+            self.view.start_btn.setEnabled(False)
+            if self.view.active_code and self.is_sender:
+                self.view.reconnect_btn.setVisible(True)
 
     def handle_remote_error(self, err_msg: str) -> None:
         if hasattr(self, "worker") and self.worker.isRunning():
             self.worker.stop()
             self.worker.wait(5000)  # Wait for thread to finish (5s timeout)
+
+        save_path = None
+        if hasattr(self, "decryptor"):
+            save_path = self.decryptor.save_path
+            self.decryptor.close()
+            del self.decryptor
+
         self.transfer_pending = False
         self.view.file_info.setText(f"❌ Error: {err_msg}")
         self.view.update_transfer_status("error")
+        self.view.start_btn.setEnabled(False)
+        if self.view.active_code and self.is_sender:
+            self.view.reconnect_btn.setVisible(True)
+        self.view.progress_bar.setValue(0)
+
+        if save_path and os.path.exists(save_path):
+            reply = QMessageBox.question(
+                self.view,
+                "Delete incomplete file?",
+                f"An error occurred. Delete the corrupted/incomplete file?\n{os.path.basename(save_path)}",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                try:
+                    os.remove(save_path)
+                except Exception:
+                    pass
+
+    def cancel_transfer(self) -> None:
+        if hasattr(self, "ipc") and getattr(self.ipc, "running", False):
+            self.ipc.send_json({"type": "error", "msg": "Transfer cancelled by user."})
+
+        if hasattr(self, "worker") and self.worker.isRunning():
+            self.worker.stop()
+            self.worker.wait(2000)
+
+        save_path = None
+        if hasattr(self, "decryptor"):
+            save_path = self.decryptor.save_path
+            self.decryptor.close()
+            del self.decryptor
+
+        self.transfer_pending = False
+        self.view.file_info.setText("Transfer cancelled.")
+        self.view.update_transfer_status("error")
         self.view.start_btn.setEnabled(True)
+        self.view.progress_bar.setValue(0)
+
+        if save_path and os.path.exists(save_path):
+            reply = QMessageBox.question(
+                self.view,
+                "Delete incomplete file?",
+                f"Transfer was cancelled. Delete the incomplete file?\n{os.path.basename(save_path)}",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                try:
+                    os.remove(save_path)
+                    self.view.show_notification("Deleted", "Incomplete file deleted successfully.")
+                except Exception as e:
+                    print(f"Failed to delete: {e}")
 
     def handle_incoming_metadata(self, msg: dict) -> None:
         filename = msg.get("name", "unknown_file")

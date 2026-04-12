@@ -176,14 +176,28 @@ class P2PWindow(QMainWindow):
         header = QHBoxLayout()
         self.title = QLabel("Transfer Engine")
         self.title.setStyleSheet("font-size: 20px; font-weight: bold;")
+        
+        self.reconnect_btn = QPushButton("🔄")
+        self.reconnect_btn.setObjectName("ActionBtn")
+        self.reconnect_btn.setVisible(False)
+        self.reconnect_btn.setToolTip("Retry connection with same code")
+        # -----------------------------
+
         self.connect_btn = QPushButton("Connect to Peer")
         self.connect_btn.setObjectName("ConnectBtn")
+
         header.addWidget(self.title)
         header.addStretch()
+        header.addWidget(self.reconnect_btn)
         header.addWidget(self.connect_btn)
 
         self.drop_zone = DropZone()
         self.file_info = QLabel("Ready to transmit...")
+
+
+        self.file_info.setWordWrap(True)
+        self.file_info.setMinimumHeight(40)
+
         self.progress_bar = QProgressBar()
 
         self.active_code = ""
@@ -200,13 +214,22 @@ class P2PWindow(QMainWindow):
         self.start_btn.setObjectName("StartBtn")
         self.start_btn.setEnabled(False)
 
+        self.cancel_btn = QPushButton("CANCEL TRANSFER")
+        self.cancel_btn.setObjectName("WarningBtn")
+        self.cancel_btn.setVisible(False)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.setContentsMargins(0, 0, 0, 0)
+        btn_layout.addWidget(self.start_btn)
+        btn_layout.addWidget(self.cancel_btn)
+
         trans_layout.addLayout(header)
         trans_layout.addSpacing(20)
         trans_layout.addWidget(self.drop_zone)
         trans_layout.addWidget(self.file_info)
         trans_layout.addWidget(self.progress_bar)
         trans_layout.addWidget(self.pwd_input)
-        trans_layout.addWidget(self.start_btn)
+        trans_layout.addLayout(btn_layout)
         self.content_area.addWidget(self.page_transfer)
 
     def init_settings_page(self):
@@ -346,10 +369,27 @@ class P2PWindow(QMainWindow):
             if not ok or not pwd:
                 return None, None
 
+        if filename.endswith(".tar.gz"):
+            extension = ".tar.gz"
+        else:
+            extension = os.path.splitext(filename)[1]
+
         initial_path = os.path.join(default_dir, filename) if default_dir else filename
-        save_path, _ = QFileDialog.getSaveFileName(self, "Save File As", initial_path)
+        
+        filter_str = f"Target File (*{extension})" if extension else "All Files (*)"
+
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save File As",
+            initial_path,
+            filter_str
+        )
+
         if not save_path:
             return None, None
+
+        if extension and not save_path.lower().endswith(extension.lower()):
+            save_path = os.path.splitext(save_path)[0] + extension
 
         return pwd, save_path
 
@@ -414,7 +454,14 @@ class P2PWindow(QMainWindow):
         }
         msg = status_messages.get(status, status)
         self.transfer_log.setText(msg)
-        self.transfer_log.adjustSize()
+
+        if hasattr(self, 'cancel_btn') and hasattr(self, 'start_btn'):
+            if status in ["receiving", "sending"]:
+                self.start_btn.setVisible(False)
+                self.cancel_btn.setVisible(True)
+            else:
+                self.start_btn.setVisible(True)
+                self.cancel_btn.setVisible(False)
 
     def load_styles(self):
         self.change_theme("Dark")

@@ -47,6 +47,9 @@ The Go backend is spawned automatically when `main.py` starts. There is nothing 
 | 🔌 Single-button launch | `python main.py` auto-starts Go; no manual backend step |
 | 🎨 Two themes | Dark (default) and Light — switchable at runtime |
 | 🪶 Zero server storage | Signal broker is stateless; it only relays ~4 KB of SDP text |
+| Automatic Cleanup | The receiver is prompted to delete incomplete or corrupted files if a transfer is interrupted or cancelled |
+| Sender Session Reset | If the signaling window (60s) expires, the sender can generate a new peer code and restart the engine in one click |
+| Extension Guard | Protects against accidental file corruption by ensuring the correct file extension (e.g., .tar) is preserved during the "Save As" dialog |
 
 ---
 
@@ -493,9 +496,9 @@ Connect one instance as Sender and the other as Receiver pointing at the same `l
 ## 📋 Roadmap
 
 - [ ] Resume interrupted transfers (chunk sequence numbers)
-- [ ] Multi-file / folder transfer (zip on the fly)
+- [x] Multi-file / folder transfer (zip on the fly) - Done via .tar.gz streaming
 - [ ] TURN server fallback for networks that block UDP entirely
-- [ ] Progress indication on the receiver side (requires metadata size field relay)
+- [x] Progress indication on the receiver side (requires metadata size field relay) - Done using the size field in metadata and calculations in the chunk handler
 - [ ] Packaged installers (PyInstaller + bundled binary)
 - [ ] End-to-end integration tests with two holepunch instances in CI
 

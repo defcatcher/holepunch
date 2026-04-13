@@ -457,26 +457,7 @@ Every message between Python and Go is framed with a **4-byte big-endian length 
 Payload is either a UTF-8 JSON control message or a raw binary encrypted chunk. Python distinguishes the two with a `try/except json.loads` heuristic; Go uses `json.Unmarshal` for the same purpose.
 
 ---
-
-## 🧩 How Local Testing Works (mock_router.py)
-
-Before the full Go backend existed, `mock_router.py` acted as a TCP pipe between two Python instances running on the same machine. It still works for testing the Python-only encryption/decryption path:
-
-```bash
-# Terminal 1 — the pipe
-python mock_router.py
-
-# Terminal 2 — sender
-python main.py
-
-# Terminal 3 — receiver
-python main.py
-```
-
-Connect one instance as Sender and the other as Receiver pointing at the same `localhost:1488`. Useful for validating the AES-GCM layer without touching WebRTC.
-
----
-
+ 
 ## 🤝 Contributing
 
 1. **Fork** the repository and create a feature branch.

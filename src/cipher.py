@@ -1,5 +1,6 @@
 import os
 import tarfile
+import time
 import weakref
 from PyQt6.QtCore import QThread, pyqtSignal
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -49,6 +50,8 @@ class FileEncryptorThread(QThread):
 
                     processed_size += len(chunk)
                     self.progress.emit(processed_size)
+                    time.sleep(0.001)
+
 
             if self.is_running:
                 self.finished.emit()

@@ -238,7 +238,7 @@ func (sess *session) dispatchControl(ctx context.Context, typ models.MessageType
 		}
 		sess.handleConnect(ctx, msg)
 
-	case models.TypeMetadata, models.TypeReady, models.TypeError:
+	case models.TypeMetadata, models.TypeReady, models.TypeError, "chat":
 		// Forward the raw JSON bytes verbatim to the remote peer as a
 		// DataChannel text frame. The receiver's IPC server will write them
 		// straight to its Python client — no re-encoding needed.

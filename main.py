@@ -14,7 +14,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from src.cipher import FileDecryptor, FileEncryptorThread, FolderEncryptorThread
-from src.gui import P2PWindow
+from src.gui import P2PWindow, ChatWindow
 from src.ipc_link import IPCClientThread
 
 def get_path_size(path: str) -> int:
@@ -209,9 +209,11 @@ class AppController:
         self.view.connect_btn.clicked.connect(self.view.show_connect_dialog)
         self.view.peer_connected.connect(self.on_peer_ready)
         self.view.start_btn.clicked.connect(self.run_transfer)
+        self.view.reconnect_btn.clicked.connect(self.reconnect_peer)
         self.view.cancel_btn.clicked.connect(self.cancel_transfer)
         self.view.btn_apply_port.clicked.connect(self.change_ipc_port)
         self.view.window_closing.connect(self.on_window_closing)
+        
         self.view.port_input.setText(str(_saved_port))
 
         saved_dir = _load_config().get("default_dir", "")
@@ -221,6 +223,10 @@ class AppController:
         self.view.path_input.textChanged.connect(
             lambda text: _save_config({"default_dir": text})
         )
+
+        self.chat_window = ChatWindow(self.view)
+        self.view.btn_chat.clicked.connect(self.chat_window.show)
+        self.chat_window.message_sent.connect(self.send_chat_message)
 
         try:
             _start_go_backend()
@@ -397,6 +403,17 @@ class AppController:
             }
         )
 
+    def send_chat_message(self, text: str) -> None:
+        if "Connected" not in self.view.status_peer.text():
+            self.chat_window.append_message("System", "Not connected to a peer.")
+            return
+
+        self.chat_window.append_message("You", text)
+        self.ipc.send_json({
+            "type": "chat",
+            "text": text
+        })
+
     def on_ipc_json(self, msg: dict) -> None:
         msg_type = msg.get("type")
 
@@ -410,6 +427,15 @@ class AppController:
             self.handle_remote_error(msg.get("msg", "unknown error"))
         elif msg_type == "status":
             self._handle_p2p_status(msg.get("value", ""))
+        elif msg_type == "chat":
+            if not self.chat_window.isVisible():
+                self.chat_window.show()
+            message_text = msg.get("text", "")
+            self.chat_window.append_message("Peer", message_text)
+
+            if not self.chat_window.isActiveWindow():
+                preview = message_text if len(message_text) < 50 else message_text[:47] + "..."
+                self.view.show_notification("💬 New Message", preview)
 
     def _handle_p2p_status(self, value: str) -> None:
         if value == "connecting":
@@ -457,7 +483,7 @@ class AppController:
     def handle_remote_error(self, err_msg: str) -> None:
         if hasattr(self, "worker") and self.worker.isRunning():
             self.worker.stop()
-            self.worker.wait(5000)  # Wait for thread to finish (5s timeout)
+            self.worker.wait(5000)
 
         save_path = None
         if hasattr(self, "decryptor"):
@@ -640,7 +666,7 @@ class AppController:
 
                 elapsed = now - self.transfer_start_time
                 if elapsed > 0:
-                    speed = processed_size / elapsed  # Effective throughput (useful data)
+                    speed = processed_size / elapsed  
                     remaining = self.total_transfer_size - processed_size
                     eta = remaining / speed if speed > 0 else 0
                     speed_str, eta_str = format_speed_eta(speed, eta)
@@ -663,7 +689,6 @@ class AppController:
         self.view.start_btn.setEnabled(True)
 
     def on_window_closing(self) -> None:
-        """Handle window close event to ensure orderly shutdown of all resources."""
         if hasattr(self, "worker") and self.worker.isRunning():
             self.worker.stop()
             self.worker.wait(5000)
@@ -679,7 +704,6 @@ class AppController:
             self.ipc.wait(5000)
 
     def _shutdown(self) -> None:
-        """Shut down all resources orderly."""
         if hasattr(self, "worker") and self.worker.isRunning():
             self.worker.stop()
             self.worker.wait(5000)
@@ -698,7 +722,6 @@ class AppController:
 
     @staticmethod
     def _format_size(size_bytes: int) -> str:
-        """Format byte size into human-readable string."""
         if size_bytes < 1024:
             return f"{size_bytes} B"
         elif size_bytes < 1024 * 1024:

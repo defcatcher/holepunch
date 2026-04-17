@@ -22,7 +22,8 @@ from PyQt6.QtWidgets import (
     QStackedWidget,
     QVBoxLayout,
     QWidget,
-    QSystemTrayIcon
+    QSystemTrayIcon,
+    QTextEdit
 )
 
 
@@ -82,7 +83,7 @@ class CodeInputDialog(QDialog):
 
 class P2PWindow(QMainWindow):
     peer_connected = pyqtSignal(str)
-    window_closing = pyqtSignal()  # Signal to notify controller about window close
+    window_closing = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -112,12 +113,18 @@ class P2PWindow(QMainWindow):
         self.btn_send = QPushButton("📤 Send File")
         self.btn_send.setObjectName("NavBtn")
         self.btn_send.setProperty("selected", True)
+        
         self.btn_settings = QPushButton("⚙️ Settings")
         self.btn_settings.setObjectName("NavBtn")
         self.btn_settings.setProperty("selected", False)
 
+        self.btn_chat = QPushButton("💬 Chat")
+        self.btn_chat.setObjectName("NavBtn")
+        self.btn_chat.setProperty("selected", False)
+
         sidebar_layout.addWidget(self.btn_send)
         sidebar_layout.addWidget(self.btn_settings)
+        sidebar_layout.addWidget(self.btn_chat)
         sidebar_layout.addStretch()
 
         self.status_ipc = QLabel("🔌 Backend: Lost")
@@ -130,7 +137,6 @@ class P2PWindow(QMainWindow):
             "color: #7f8c8d; padding: 5px 10px; font-size: 11px;"
         )
 
-        # Transfer status log (detailed activity feed)
         self.transfer_log = QLabel()
         self.transfer_log.setObjectName("TransferLog")
         self.transfer_log.setWordWrap(True)
@@ -181,7 +187,6 @@ class P2PWindow(QMainWindow):
         self.reconnect_btn.setObjectName("ActionBtn")
         self.reconnect_btn.setVisible(False)
         self.reconnect_btn.setToolTip("Retry connection with same code")
-        # -----------------------------
 
         self.connect_btn = QPushButton("Connect to Peer")
         self.connect_btn.setObjectName("ConnectBtn")
@@ -193,8 +198,6 @@ class P2PWindow(QMainWindow):
 
         self.drop_zone = DropZone()
         self.file_info = QLabel("Ready to transmit...")
-
-
         self.file_info.setWordWrap(True)
         self.file_info.setMinimumHeight(40)
 
@@ -429,7 +432,7 @@ class P2PWindow(QMainWindow):
         
         if os.path.exists(style_path):
             with open(style_path, "r") as f:
-                self.setStyleSheet(f.read())
+                QApplication.instance().setStyleSheet(f.read())
         else:
             print(f"Warning: Theme file {style_path} not found.")
 
@@ -437,7 +440,6 @@ class P2PWindow(QMainWindow):
         self.signal_url_input.setText(url)
 
     def update_transfer_status(self, status: str):
-        """Update the transfer activity log in the sidebar with detailed status."""
         status_messages = {
             "peer_connecting": "🔄 Connecting to peer…",
             "peer_connected": "✅ Peer connected",
@@ -470,12 +472,49 @@ class P2PWindow(QMainWindow):
             self.tray_icon.showMessage(title, message, QSystemTrayIcon.MessageIcon.Information, 4000)
 
     def clear_clipboard_password(self):
-        """Clear any password from the clipboard for security."""
         QApplication.clipboard().clear()
 
     def closeEvent(self, event: QCloseEvent):
-        """Handle window close event to ensure orderly shutdown."""
         self.window_closing.emit()
         if hasattr(self, 'tray_icon'):
             self.tray_icon.hide()
         event.accept()
+
+
+class ChatWindow(QDialog):
+    message_sent = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("P2P Chat")
+        self.resize(400, 500)
+
+        layout = QVBoxLayout(self)
+
+        self.display = QTextEdit()
+        self.display.setReadOnly(True)
+        layout.addWidget(self.display)
+
+        input_layout = QHBoxLayout()
+        self.input_field = QLineEdit()
+        self.input_field.setPlaceholderText("Type a message...")
+        self.input_field.returnPressed.connect(self.send_msg)
+
+        self.btn_send = QPushButton("Send")
+        self.btn_send.clicked.connect(self.send_msg)
+
+        input_layout.addWidget(self.input_field)
+        input_layout.addWidget(self.btn_send)
+        layout.addLayout(input_layout)
+
+    def send_msg(self):
+        text = self.input_field.text().strip()
+        if text:
+            self.message_sent.emit(text)
+            self.input_field.clear()
+
+    def append_message(self, sender: str, text: str):
+        color = "#27ae60" if sender == "You" else "#2980b9"
+        if sender == "System":
+            color = "#c0392b"
+        self.display.append(f"<b style='color:{color}'>{sender}:</b> {text}")

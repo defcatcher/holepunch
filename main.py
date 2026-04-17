@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 import time
+import appdirs
 from pathlib import Path
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QApplication, QMessageBox
@@ -45,8 +46,10 @@ def format_speed_eta(bytes_per_sec: float, eta_seconds: float) -> tuple[str, str
         
     return speed_str, eta_str
 
-CONFIG_FILE = Path(__file__).parent / "config.json"
-
+APP_NAME = "HolePunch"
+APP_AUTHOR = "HolePunchDevs"
+config_dir = Path(appdirs.user_config_dir(APP_NAME, APP_AUTHOR))
+CONFIG_FILE = config_dir / "config.json"
 
 def _load_config() -> dict:
     try:
@@ -57,9 +60,10 @@ def _load_config() -> dict:
         pass
     return {}
 
-
 def _save_config(data: dict) -> None:
     try:
+        config_dir.mkdir(parents=True, exist_ok=True)
+        
         existing = _load_config()
         existing.update(data)
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -74,7 +78,8 @@ SIGNAL_URL: str = (
     or "http://localhost:8080"
 )
 
-IPC_ADDR: str = "127.0.0.1:1488"
+_saved_port = _load_config().get("ipc_port", 1488)
+IPC_ADDR: str = f"127.0.0.1:{_saved_port}"
 
 _go_proc: subprocess.Popen | None = None
 
@@ -196,7 +201,7 @@ class AppController:
         self.peer_ready = False
         self.is_sender = False
         self.is_receiver = False
-        self.transfer_pending = False  # metadata sent, waiting for receiver ready
+        self.transfer_pending = False
         self.total_transfer_size = 0
         self.transfer_start_time = 0.0
 
@@ -204,10 +209,18 @@ class AppController:
         self.view.connect_btn.clicked.connect(self.view.show_connect_dialog)
         self.view.peer_connected.connect(self.on_peer_ready)
         self.view.start_btn.clicked.connect(self.run_transfer)
-        self.view.reconnect_btn.clicked.connect(self.reconnect_peer)
         self.view.cancel_btn.clicked.connect(self.cancel_transfer)
         self.view.btn_apply_port.clicked.connect(self.change_ipc_port)
         self.view.window_closing.connect(self.on_window_closing)
+        self.view.port_input.setText(str(_saved_port))
+
+        saved_dir = _load_config().get("default_dir", "")
+        if saved_dir:
+            self.view.path_input.setText(saved_dir)
+
+        self.view.path_input.textChanged.connect(
+            lambda text: _save_config({"default_dir": text})
+        )
 
         try:
             _start_go_backend()
@@ -245,6 +258,7 @@ class AppController:
     def change_ipc_port(self) -> None:
         new_port = int(self.view.port_input.text())
         if new_port != self.ipc.port:
+            _save_config({"ipc_port": new_port})
             self.view.status_ipc.setText("🔌 Backend: Reconnecting…")
             self.view.status_ipc.setStyleSheet(
                 "color: #f1c40f; padding: 5px 10px; font-size: 11px;"
@@ -650,43 +664,36 @@ class AppController:
 
     def on_window_closing(self) -> None:
         """Handle window close event to ensure orderly shutdown of all resources."""
-        # Stop any running worker thread
         if hasattr(self, "worker") and self.worker.isRunning():
             self.worker.stop()
             self.worker.wait(5000)
 
-        # Close any open decryptor
         if hasattr(self, "decryptor"):
             try:
                 self.decryptor.close()
             except Exception:
                 pass
 
-        # Stop IPC connection
         if hasattr(self, "ipc"):
             self.ipc.stop()
             self.ipc.wait(5000)
 
     def _shutdown(self) -> None:
         """Shut down all resources orderly."""
-        # Stop any running worker thread
         if hasattr(self, "worker") and self.worker.isRunning():
             self.worker.stop()
             self.worker.wait(5000)
 
-        # Close any open decryptor
         if hasattr(self, "decryptor"):
             try:
                 self.decryptor.close()
             except Exception:
                 pass
 
-        # Stop IPC connection
         if hasattr(self, "ipc"):
             self.ipc.stop()
             self.ipc.wait(5000)
 
-        # Stop Go backend
         _stop_go_backend()
 
     @staticmethod
@@ -704,7 +711,6 @@ class AppController:
     def run(self) -> None:
         self.view.show()
         exit_code = self.app.exec()
-        # Ensure clean shutdown before exiting
         self._shutdown()
         sys.exit(exit_code)
 

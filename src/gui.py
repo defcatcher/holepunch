@@ -404,7 +404,6 @@ class P2PWindow(QMainWindow):
         self.pwd_input.setText(pwd)
         clipboard = QApplication.clipboard()
         clipboard.setText(pwd)
-        # Schedule clipboard clear after 60 seconds to limit password exposure
         QTimer.singleShot(60000, clipboard.clear)
         QMessageBox.information(
             self, "Copied", "Secure password generated and copied to clipboard!\n(Password will be cleared from clipboard in 60 seconds)"
@@ -476,10 +475,7 @@ class P2PWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent):
         """Handle window close event to ensure orderly shutdown."""
-        # Notify controller to clean up resources (IPC, workers, decryptor)
         self.window_closing.emit()
-        # Hide tray icon
         if hasattr(self, 'tray_icon'):
             self.tray_icon.hide()
-        # Accept the close event
         event.accept()
